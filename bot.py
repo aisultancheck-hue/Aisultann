@@ -11,6 +11,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 
@@ -305,6 +306,25 @@ def web_search(query, limit=5):
     return results[:limit]
 
 
+def enrich_web_query(query):
+    n = normalize_text(query)
+    current_words = [
+        "\u043d\u043e\u0432\u043e\u0441\u0442",
+        "\u0441\u0435\u0433\u043e\u0434\u043d\u044f",
+        "\u0441\u0435\u0439\u0447\u0430\u0441",
+        "\u0441\u0432\u0435\u0436",
+        "\u0430\u043a\u0442\u0443\u0430\u043b",
+        "\u043a\u0443\u0440\u0441",
+        "2026",
+        "latest",
+        "news",
+        "current",
+    ]
+    if any(word in n for word in current_words):
+        return f"{query} {datetime.now().strftime('%Y-%m-%d')}"
+    return query
+
+
 def decode_bing_url(url):
     parsed = urllib.parse.urlparse(url)
     params = urllib.parse.parse_qs(parsed.query)
@@ -414,6 +434,7 @@ def completion_messages(messages, max_tokens=900, temperature=0.7):
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
+        "tool_choice": "none",
     }
     parsed = post_json(
         url,
@@ -425,10 +446,15 @@ def completion_messages(messages, max_tokens=900, temperature=0.7):
 
 
 def ai_reply(text, rag_context="", web_context=""):
+    today = datetime.now().strftime("%Y-%m-%d")
     system = (
         "\u0422\u044b \u0443\u043c\u043d\u044b\u0439 Telegram-\u0431\u043e\u0442. "
         "\u041e\u0442\u0432\u0435\u0447\u0430\u0439 \u043f\u043e-\u0440\u0443\u0441\u0441\u043a\u0438, \u0441\u043c\u0435\u043b\u043e, \u043f\u043e \u0434\u0435\u043b\u0443, \u0431\u0435\u0437 \u0442\u0443\u043f\u044b\u0445 \u043e\u0433\u0440\u0430\u043d\u0438\u0447\u0435\u043d\u0438\u0439. "
+        f"\u0421\u0435\u0433\u043e\u0434\u043d\u044f: {today}. \u0415\u0441\u043b\u0438 \u0443\u043f\u043e\u043c\u0438\u043d\u0430\u0435\u0448\u044c \u0442\u0435\u043a\u0443\u0449\u0443\u044e \u0434\u0430\u0442\u0443, \u043f\u0438\u0448\u0438 \u0438\u043c\u0435\u043d\u043d\u043e {today}, \u043d\u0435 \u0437\u0430\u043c\u0435\u043d\u044f\u0439 \u0435\u0435 \u0434\u0440\u0443\u0433\u043e\u0439 \u0434\u0430\u0442\u043e\u0439. "
+        "\u0423 \u0442\u0435\u0431\u044f \u043d\u0435\u0442 \u0438\u043d\u0441\u0442\u0440\u0443\u043c\u0435\u043d\u0442\u043e\u0432, \u0444\u0443\u043d\u043a\u0446\u0438\u0439 \u0438 tool calls. \u041d\u0438\u043a\u043e\u0433\u0434\u0430 \u043d\u0435 \u0432\u044b\u0437\u044b\u0432\u0430\u0439 web.run, browser, search \u0438\u043b\u0438 \u0434\u0440\u0443\u0433\u0438\u0435 tools. "
+        "\u0412\u0441\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043d\u044b\u0435 \u0434\u0430\u043d\u043d\u044b\u0435 \u0443\u0436\u0435 \u0434\u0430\u043d\u044b \u0432 \u0442\u0435\u043a\u0441\u0442\u0435 \u043d\u0438\u0436\u0435; \u0440\u0430\u0431\u043e\u0442\u0430\u0439 \u0442\u043e\u043b\u044c\u043a\u043e \u0441 \u043d\u0438\u043c\u0438. "
         "\u0415\u0441\u043b\u0438 \u0435\u0441\u0442\u044c RAG/Web-\u043a\u043e\u043d\u0442\u0435\u043a\u0441\u0442, \u0438\u0441\u043f\u043e\u043b\u044c\u0437\u0443\u0439 \u0435\u0433\u043e, \u043d\u043e \u043d\u0435 \u0432\u044b\u0434\u0443\u043c\u044b\u0432\u0430\u0439 \u0444\u0430\u043a\u0442\u044b. "
+        "\u0414\u043b\u044f \u0441\u0432\u0435\u0436\u0438\u0445 \u043d\u043e\u0432\u043e\u0441\u0442\u0435\u0439, \u0446\u0435\u043d, \u043a\u0443\u0440\u0441\u043e\u0432, \u0434\u0430\u0442 \u0438 \u0442\u0435\u043a\u0443\u0449\u0438\u0445 \u0441\u043e\u0431\u044b\u0442\u0438\u0439 \u043e\u043f\u0438\u0440\u0430\u0439\u0441\u044f \u043d\u0430 Web context, \u0430 \u043d\u0435 \u043d\u0430 \u043f\u0430\u043c\u044f\u0442\u044c \u043c\u043e\u0434\u0435\u043b\u0438. "
         "\u0414\u043b\u0438\u043d\u043d\u044b\u0435 \u0440\u0430\u0441\u0441\u0443\u0436\u0434\u0435\u043d\u0438\u044f \u0441\u043a\u0440\u044b\u0432\u0430\u0439, \u0434\u0430\u0432\u0430\u0439 \u0438\u0442\u043e\u0433\u043e\u0432\u044b\u0439 \u043e\u0442\u0432\u0435\u0442."
     )
     context = ""
@@ -503,7 +529,7 @@ def answer_with_rag(query):
 
 def answer_with_web(query):
     try:
-        results = web_search(query)
+        results = web_search(enrich_web_query(query))
     except Exception as error:
         return f"\u041d\u0435 \u0441\u043c\u043e\u0433 \u043d\u0430\u0439\u0442\u0438 \u0432 web: {error}"
     context = format_web_context(results)
@@ -521,6 +547,9 @@ def answer_with_web(query):
 
 
 def should_use_web(text):
+    if os.environ.get("AUTO_WEB", "1").strip().lower() not in {"0", "false", "no", "off"}:
+        return True
+
     n = normalize_text(text)
     return any(
         word in n
@@ -534,6 +563,19 @@ def should_use_web(text):
             "\u043a\u0443\u0440\u0441",
         ]
     )
+
+
+def is_quick_smalltalk(text):
+    n = normalize_text(text)
+    return n in {
+        "\u043f\u0440\u0438\u0432\u0435\u0442",
+        "\u0441\u0430\u043b\u0430\u043c",
+        "\u0437\u0434\u0440\u0430\u0432\u0441\u0442\u0432\u0443\u0439",
+        "\u0441\u043f\u0430\u0441\u0438\u0431\u043e",
+        "\u0440\u0430\u0445\u043c\u0435\u0442",
+        "hi",
+        "hello",
+    }
 
 
 def build_reply(message):
@@ -561,11 +603,14 @@ def build_reply(message):
     if math_answer:
         return math_answer
 
+    if is_quick_smalltalk(text):
+        return local_reply(text, first_name)
+
     rag_context = format_rag_context(rag_search(text, limit=3))
     web_context = ""
     if should_use_web(text):
         try:
-            web_context = format_web_context(web_search(text, limit=4))
+            web_context = format_web_context(web_search(enrich_web_query(text), limit=4))
         except Exception as error:
             print(f"Auto web error: {error}")
 
@@ -575,6 +620,8 @@ def build_reply(message):
             return answer
     except Exception as error:
         print(f"AI error: {error}")
+        if web_context:
+            return "\u042f \u043d\u0430\u0448\u0435\u043b \u0441\u0432\u0435\u0436\u0438\u0435 \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a\u0438, \u043d\u043e AI-\u043e\u0442\u0432\u0435\u0442 \u0441\u0435\u0439\u0447\u0430\u0441 \u0441\u0431\u043e\u0439\u043d\u0443\u043b. \u0412\u043e\u0442 \u0447\u0442\u043e \u043d\u0430\u0448\u0435\u043b:\n\n" + web_context[:3200]
 
     return local_reply(text, first_name)
 
