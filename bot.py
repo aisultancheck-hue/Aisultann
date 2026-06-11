@@ -543,6 +543,9 @@ def build_reply(message):
     if not text:
         return "\u042f \u043f\u043e\u043a\u0430 \u043f\u043e\u043d\u0438\u043c\u0430\u044e \u0442\u043e\u043b\u044c\u043a\u043e \u0442\u0435\u043a\u0441\u0442."
 
+    if text in {"/start", "/help"} or text.startswith("/echo"):
+        return local_reply(text, first_name)
+
     if text.startswith("/rag"):
         query = text.removeprefix("/rag").strip()
         return answer_with_rag(query or "\u0447\u0442\u043e \u0432 \u0434\u043e\u043a\u0443\u043c\u0435\u043d\u0442\u0430\u0445?")
@@ -550,6 +553,13 @@ def build_reply(message):
     if text.startswith("/web"):
         query = text.removeprefix("/web").strip()
         return answer_with_web(query or "\u043d\u043e\u0432\u043e\u0441\u0442\u0438")
+
+    if text.startswith("/"):
+        return local_reply(text, first_name)
+
+    math_answer = try_math(text)
+    if math_answer:
+        return math_answer
 
     rag_context = format_rag_context(rag_search(text, limit=3))
     web_context = ""
