@@ -13,6 +13,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
+from xml.etree import ElementTree
 
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
@@ -281,8 +282,115 @@ def format_rag_context(results):
     return "\n\n".join(parts)
 
 
-def web_search(query, limit=5):
-    url = "https://www.bing.com/search?" + urllib.parse.urlencode({"q": query})
+def clean_html_text(value):
+    value = re.sub(r"<.*?>", " ", value or "", flags=re.DOTALL)
+    value = html.unescape(value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def web_query_variants(query):
+    today = datetime.now().strftime("%Y-%m-%d")
+    n = normalize_text(query)
+    variants = []
+    if is_gpu_query(query):
+        variants.extend(
+            [
+                "GPU news NVIDIA AMD RTX Radeon 2026",
+                "\u043d\u043e\u0432\u043e\u0441\u0442\u0438 \u0432\u0438\u0434\u0435\u043e\u043a\u0430\u0440\u0442\u044b NVIDIA AMD RTX Radeon 2026",
+                "\u043d\u043e\u0432\u044b\u0435 \u0432\u0438\u0434\u0435\u043e\u043a\u0430\u0440\u0442\u044b NVIDIA AMD RTX Radeon",
+            ]
+        )
+    if "\u043a\u0430\u0437\u0430\u0445\u0441\u0442\u0430\u043d" in n or "\u043a\u0430\u0437\u0430\u0445\u0441\u0442\u0430\u043d\u0430" in n:
+        variants.extend(
+            [
+                "\u043d\u043e\u0432\u043e\u0441\u0442\u0438 \u041a\u0430\u0437\u0430\u0445\u0441\u0442\u0430\u043d 2026",
+                "\u041a\u0430\u0437\u0430\u0445\u0441\u0442\u0430\u043d \u043d\u043e\u0432\u043e\u0441\u0442\u0438 \u0441\u0435\u0433\u043e\u0434\u043d\u044f",
+            ]
+        )
+    variants.append(expand_web_query(query))
+    variants.extend(
+        [
+            f"{query} {today}",
+            f"{query} \u043d\u043e\u0432\u043e\u0441\u0442\u0438 \u0441\u0435\u0433\u043e\u0434\u043d\u044f",
+            f"{query} latest news {today}",
+        ]
+    )
+    unique = []
+    for item in variants:
+        normalized = item.strip()
+        if normalized and normalized not in unique:
+            unique.append(normalized)
+    return unique
+
+
+def is_gpu_query(query):
+    n = normalize_text(query)
+    return any(word in n for word in ["\u0432\u0438\u0434\u0435\u043e\u043a\u0430\u0440\u0442", "gpu", "rtx", "radeon", "nvidia", "amd", "geforce"])
+
+
+def result_relevant(query, item):
+    text = normalize_text(f"{item.get('title', '')} {item.get('snippet', '')} {item.get('url', '')}")
+    if is_gpu_query(query):
+        return any(word in text for word in ["gpu", "nvidia", "amd", "rtx", "radeon", "geforce", "\u0432\u0438\u0434\u0435\u043e\u043a\u0430\u0440\u0442", "\u0433\u0440\u0430\u0444\u0438\u0447\u0435\u0441\u043a"])
+    n = normalize_text(query)
+    if "\u043a\u0430\u0437\u0430\u0445\u0441\u0442\u0430\u043d" in n or "\u043a\u0430\u0437\u0430\u0445\u0441\u0442\u0430\u043d\u0430" in n:
+        return "\u043a\u0430\u0437\u0430\u0445\u0441\u0442\u0430\u043d" in text or "kazakhstan" in text
+    return True
+
+
+def expand_web_query(query):
+    n = normalize_text(query)
+    extra = []
+    if any(word in n for word in ["\u0432\u0438\u0434\u0435\u043e\u043a\u0430\u0440\u0442", "gpu", "rtx", "radeon", "nvidia", "amd", "geforce"]):
+        extra.append("GPU NVIDIA AMD RTX Radeon GeForce")
+    if "\u043a\u0430\u0437\u0430\u0445\u0441\u0442\u0430\u043d" in n or "\u043a\u0430\u0437\u0430\u0445\u0441\u0442\u0430\u043d\u0430" in n:
+        extra.append("Kazakhstan Tengrinews Kapital Kursiv")
+    if any(word in n for word in ["\u043d\u043e\u0432\u043e\u0441\u0442", "\u0441\u0432\u0435\u0436", "\u0441\u0435\u0433\u043e\u0434\u043d\u044f", "\u0441\u0435\u0439\u0447\u0430\u0441"]):
+        extra.append("news latest")
+    if not extra:
+        return query
+    return f"{query} {' '.join(extra)}"
+
+
+def bing_news_search(query, limit=5):
+    url = "https://www.bing.com/news/search?" + urllib.parse.urlencode(
+        {"q": query, "format": "RSS", "setlang": "ru-RU", "cc": "KZ"}
+    )
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(request, timeout=20) as response:
+        body = response.read().decode("utf-8", errors="replace")
+
+    root = ElementTree.fromstring(body)
+    results = []
+    for item in root.findall("./channel/item"):
+        title = clean_html_text(item.findtext("title"))
+        link = decode_bing_news_url(clean_html_text(item.findtext("link")))
+        snippet = clean_html_text(item.findtext("description"))
+        published = clean_html_text(item.findtext("pubDate"))
+        source = clean_html_text(item.findtext("{*}Source"))
+        if not title and not snippet:
+            continue
+        meta = []
+        if source:
+            meta.append(source)
+        if published:
+            meta.append(published)
+        if meta:
+            snippet = f"{' | '.join(meta)}. {snippet}"
+        results.append({"title": title, "url": link, "snippet": snippet, "kind": "news"})
+        if len(results) >= limit:
+            break
+    return results
+
+
+def decode_bing_news_url(url):
+    parsed = urllib.parse.urlparse(url)
+    params = urllib.parse.parse_qs(parsed.query)
+    return params.get("url", [url])[0]
+
+
+def bing_web_search(query, limit=5):
+    url = "https://www.bing.com/search?" + urllib.parse.urlencode({"q": query, "setlang": "ru-RU", "cc": "KZ"})
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(request, timeout=20) as response:
         page = response.read().decode("utf-8", errors="replace")
@@ -296,14 +404,39 @@ def web_search(query, limit=5):
             continue
 
         final_url = decode_bing_url(html.unescape(title_match.group("url")))
-        title = html.unescape(re.sub(r"<.*?>", "", title_match.group("title")))
-        snippet = ""
-        if snippet_match:
-            snippet = html.unescape(re.sub(r"<.*?>", "", snippet_match.group("snippet")))
-        results.append({"title": title.strip(), "url": final_url, "snippet": snippet.strip()})
+        title = clean_html_text(title_match.group("title"))
+        snippet = clean_html_text(snippet_match.group("snippet") if snippet_match else "")
+        results.append({"title": title, "url": final_url, "snippet": snippet, "kind": "web"})
         if len(results) >= limit:
             break
     return results[:limit]
+
+
+def web_search(query, limit=7):
+    results = []
+    for variant in web_query_variants(query):
+        try:
+            results.extend(bing_news_search(variant, limit=limit))
+        except Exception as error:
+            print(f"Bing news error: {error}")
+        try:
+            results.extend(bing_web_search(variant, limit=limit))
+        except Exception as error:
+            print(f"Bing web error: {error}")
+        if len(results) >= limit * 2:
+            break
+
+    seen = set()
+    unique = []
+    for item in results:
+        key = item.get("url") or item.get("title")
+        if not key or key in seen or not result_relevant(query, item):
+            continue
+        seen.add(key)
+        unique.append(item)
+        if len(unique) >= limit:
+            break
+    return unique
 
 
 def enrich_web_query(query):
@@ -529,7 +662,7 @@ def answer_with_rag(query):
 
 def answer_with_web(query):
     try:
-        results = web_search(enrich_web_query(query))
+        results = web_search(query)
     except Exception as error:
         return f"\u041d\u0435 \u0441\u043c\u043e\u0433 \u043d\u0430\u0439\u0442\u0438 \u0432 web: {error}"
     context = format_web_context(results)
@@ -610,7 +743,7 @@ def build_reply(message):
     web_context = ""
     if should_use_web(text):
         try:
-            web_context = format_web_context(web_search(enrich_web_query(text), limit=4))
+            web_context = format_web_context(web_search(text, limit=7))
         except Exception as error:
             print(f"Auto web error: {error}")
 
